@@ -1,8 +1,9 @@
 'use client'
 
-import { useRef } from 'react'
-import { motion, useInView } from 'motion/react'
-import { ExternalLink } from 'lucide-react'
+import { useRef, useState, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
+import { motion, useInView, AnimatePresence } from 'motion/react'
+import { ExternalLink, X, Monitor } from 'lucide-react'
 
 const EASE = [0.16, 1, 0.3, 1] as [number, number, number, number]
 
@@ -290,7 +291,19 @@ const GLOW_VIOLET_HOVER = '0 0 0 1px oklch(0.65 0.27 290 / 55%), 0 0 55px oklch(
 const GLOW_ELECTRIC_BASE = '0 0 0 1px oklch(0.65 0.22 250 / 22%), 0 0 30px oklch(0.65 0.22 250 / 10%)'
 const GLOW_ELECTRIC_HOVER = '0 0 0 1px oklch(0.65 0.22 250 / 55%), 0 0 55px oklch(0.65 0.22 250 / 28%), 0 24px 48px oklch(0 0 0 / 50%)'
 
-const sites = [
+type SiteCard = {
+  id: number
+  title: string
+  industry: string
+  description: string
+  glowBase: string
+  glowHover: string
+  labelClass: string
+  textClass: string
+  Preview: React.ComponentType
+}
+
+const sites: SiteCard[] = [
   {
     id: 1,
     title: 'Luxury Chauffeur Booking',
@@ -299,6 +312,7 @@ const sites = [
     glowBase: GLOW_GOLD_BASE,
     glowHover: GLOW_GOLD_HOVER,
     labelClass: 'border-gold/30 bg-gold/8 text-gold',
+    textClass: 'text-gold',
     Preview: ChauffeurPreview,
   },
   {
@@ -309,6 +323,7 @@ const sites = [
     glowBase: GLOW_VIOLET_BASE,
     glowHover: GLOW_VIOLET_HOVER,
     labelClass: 'border-violet/30 bg-violet/8 text-violet',
+    textClass: 'text-violet',
     Preview: SaasPreview,
   },
   {
@@ -319,6 +334,7 @@ const sites = [
     glowBase: GLOW_GOLD_BASE,
     glowHover: GLOW_GOLD_HOVER,
     labelClass: 'border-gold/30 bg-gold/8 text-gold',
+    textClass: 'text-gold',
     Preview: RealEstatePreview,
   },
   {
@@ -329,6 +345,7 @@ const sites = [
     glowBase: GLOW_GOLD_BASE,
     glowHover: GLOW_GOLD_HOVER,
     labelClass: 'border-gold/30 bg-gold/8 text-gold',
+    textClass: 'text-gold',
     Preview: RestaurantPreview,
   },
   {
@@ -339,6 +356,7 @@ const sites = [
     glowBase: GLOW_ELECTRIC_BASE,
     glowHover: GLOW_ELECTRIC_HOVER,
     labelClass: 'border-electric/30 bg-electric/8 text-electric',
+    textClass: 'text-electric',
     Preview: EcommercePreview,
   },
   {
@@ -349,6 +367,7 @@ const sites = [
     glowBase: GLOW_GOLD_BASE,
     glowHover: GLOW_GOLD_HOVER,
     labelClass: 'border-gold/30 bg-gold/8 text-gold',
+    textClass: 'text-gold',
     Preview: LawFirmPreview,
   },
   {
@@ -359,6 +378,7 @@ const sites = [
     glowBase: GLOW_VIOLET_BASE,
     glowHover: GLOW_VIOLET_HOVER,
     labelClass: 'border-violet/30 bg-violet/8 text-violet',
+    textClass: 'text-violet',
     Preview: PortfolioPreview,
   },
   {
@@ -369,6 +389,7 @@ const sites = [
     glowBase: GLOW_ELECTRIC_BASE,
     glowHover: GLOW_ELECTRIC_HOVER,
     labelClass: 'border-electric/30 bg-electric/8 text-electric',
+    textClass: 'text-electric',
     Preview: CoursePreview,
   },
 ]
@@ -385,11 +406,150 @@ const cardVariants = {
   show: { opacity: 1, y: 0, transition: { duration: 0.65, ease: EASE } },
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Scaled preview (fills modal width by transform-scaling the base design) ──
+
+const PREVIEW_BASE_W = 280
+const PREVIEW_BASE_H = 170
+
+function ScaledPreview({ Preview }: { Preview: React.ComponentType }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [scale, setScale] = useState(2.5)
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const update = () => setScale(el.clientWidth / PREVIEW_BASE_W)
+    update()
+    const obs = new ResizeObserver(update)
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [])
+
+  return (
+    <div
+      ref={containerRef}
+      style={{ width: '100%', height: PREVIEW_BASE_H * scale, overflow: 'hidden', position: 'relative' }}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: PREVIEW_BASE_W,
+          height: PREVIEW_BASE_H,
+          transformOrigin: 'top left',
+          transform: `scale(${scale})`,
+        }}
+      >
+        <Preview />
+      </div>
+    </div>
+  )
+}
+
+// ─── Preview modal ────────────────────────────────────────────────────────────
+
+function PreviewModal({ site, onClose }: { site: SiteCard; onClose: () => void }) {
+  const Preview = site.Preview
+
+  // Escape key to close
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  // Lock body scroll
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
+
+  return createPortal(
+    <>
+      {/* Backdrop */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.22 }}
+        className="fixed inset-0 z-[100]"
+        style={{
+          background: 'oklch(0 0 0 / 80%)',
+          backdropFilter: 'blur(20px)',
+        }}
+        onClick={onClose}
+        aria-hidden="true"
+      />
+
+      {/* Panel wrapper — pointer-events-none so clicks outside reach backdrop */}
+      <div className="fixed inset-0 z-[101] flex items-center justify-center p-4 sm:p-6 pointer-events-none">
+        <motion.div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Preview: ${site.title}`}
+          initial={{ opacity: 0, scale: 0.94, y: 24 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.94, y: 20 }}
+          transition={{ duration: 0.3, ease: EASE }}
+          className="relative w-full max-w-4xl glass-strong rounded-2xl overflow-hidden pointer-events-auto"
+          style={{ boxShadow: site.glowHover }}
+        >
+          {/* Modal header */}
+          <div className="flex items-center justify-between px-5 py-4 border-b border-white/8">
+            <div className="flex items-center gap-3 min-w-0">
+              <Monitor className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-foreground truncate">{site.title}</h3>
+                <span className={`text-xs ${site.textClass}`}>{site.industry}</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close preview"
+              className="flex-shrink-0 ml-4 flex items-center justify-center w-8 h-8 rounded-lg glass border border-white/10 text-muted-foreground hover:text-foreground hover:border-white/20 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Browser chrome */}
+          <div className="flex items-center gap-1.5 px-4 py-2.5 border-b border-white/8 bg-white/3">
+            <div className="w-3 h-3 rounded-full bg-red-500/55" />
+            <div className="w-3 h-3 rounded-full bg-yellow-500/55" />
+            <div className="w-3 h-3 rounded-full bg-green-500/55" />
+            <div className="flex-1 mx-3">
+              <div className="h-5 rounded-md bg-white/5 max-w-xs mx-auto flex items-center justify-center">
+                <div className="w-28 h-2 rounded-sm bg-white/10" />
+              </div>
+            </div>
+          </div>
+
+          {/* Scaled website preview */}
+          <ScaledPreview Preview={Preview} />
+
+          {/* Footer */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 px-5 py-3.5 border-t border-white/8">
+            <p className="text-xs text-muted-foreground leading-relaxed">{site.description}</p>
+            <span className="text-[11px] text-muted-foreground/40 whitespace-nowrap flex-shrink-0">Concept design only</span>
+          </div>
+        </motion.div>
+      </div>
+    </>,
+    document.body
+  )
+}
+
+// ─── Main section ─────────────────────────────────────────────────────────────
 
 export function SampleGallery() {
   const ref = useRef<HTMLDivElement>(null)
   const inView = useInView(ref, { once: true, margin: '-60px' })
+  const [activeId, setActiveId] = useState<number | null>(null)
+  const activeSite = sites.find(s => s.id === activeId) ?? null
+  const handleClose = useCallback(() => setActiveId(null), [])
 
   return (
     <section className="relative py-28 px-4 overflow-hidden">
@@ -472,17 +632,14 @@ export function SampleGallery() {
                 {/* Mini website preview */}
                 <div className="relative h-[170px] overflow-hidden flex-shrink-0">
                   <Preview />
-                  {/* Subtle bottom fade */}
                   <div className="absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-black/40 to-transparent pointer-events-none" />
                 </div>
 
                 {/* Card info */}
                 <div className="flex flex-col gap-3 p-4 flex-1">
-                  <div className="flex items-start justify-between gap-2">
-                    <span className={`inline-block px-2.5 py-0.5 rounded-full border text-[11px] font-medium leading-none py-1 ${site.labelClass}`}>
-                      {site.industry}
-                    </span>
-                  </div>
+                  <span className={`inline-block self-start px-2.5 py-1 rounded-full border text-[11px] font-medium leading-none ${site.labelClass}`}>
+                    {site.industry}
+                  </span>
 
                   <div>
                     <h3 className="text-sm font-semibold text-foreground mb-1.5 leading-snug">
@@ -495,6 +652,8 @@ export function SampleGallery() {
 
                   <div className="mt-auto pt-1">
                     <motion.button
+                      type="button"
+                      onClick={() => setActiveId(site.id)}
                       whileHover={{ scale: 1.03 }}
                       whileTap={{ scale: 0.97 }}
                       className="group/btn inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl glass border border-white/10 text-xs font-medium text-muted-foreground hover:text-foreground hover:border-white/20 transition-colors w-full justify-center"
@@ -509,6 +668,13 @@ export function SampleGallery() {
           })}
         </motion.div>
       </div>
+
+      {/* Preview modal — AnimatePresence handles enter/exit animations */}
+      <AnimatePresence>
+        {activeSite && (
+          <PreviewModal site={activeSite} onClose={handleClose} />
+        )}
+      </AnimatePresence>
     </section>
   )
 }
